@@ -1,17 +1,62 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 
-function Converter() {
+const FORMAT_CONFIG = {
+    pdf: {
+        download: true,
+        contentType: 'application/pdf',
+        fileExtension: 'pdf',
+    },
+    html: {
+        openInNewTab: true,
+        contentType: 'text/html',
+        fileExtension: 'html',
+    },
+    json: {
+        openInNewTab: true,
+        contentType: 'application/json',
+        fileExtension: 'json',
+    },
+}
+
+export default function Converter() {
     const [file, setFile] = useState(null)
     const [format, setFormat] = useState('pdf')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
 
-    const handleFileChange = (e) => {
-        setFile(e.target.files[0])
+    const handleFileChange = useCallback((e) => {
+        const selectedFile = e.target.files?.[0] || null
+        setFile(selectedFile)
         setError(null)
+    }, [])
+
+    const handleDownload = async (response, originalName, extension) => {
+        const blob = await response.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = originalName.replace('.docx', `.${extension}`)
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
     }
 
-    const handleSubmit = async () => {
+    const handleOpenInNewTab = async (response, contentType) => {
+        let content
+        if (contentType === 'application/json') {
+            const jsonData = await response.json()
+            content = JSON.stringify(jsonData, null, 2)
+        } else {
+            content = await response.text()
+        }
+        const blob = new Blob([content], { type: contentType })
+        const url = URL.createObjectURL(blob)
+        window.open(url, '_blank')
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+
+    const handleSubmit = useCallback(async () => {
         if (!file) {
             setError('Please select a .docx file first.')
             return
@@ -30,39 +75,24 @@ function Converter() {
             )
 
             if (!response.ok) {
-                const message = await response.text()
-                throw new Error(message)
+                const errorMessage = await response.text()
+                throw new Error(errorMessage || 'Conversion failed')
             }
 
-            if (format === 'pdf') {
-                // For PDF — create a download link and click it automatically
-                const blob = await response.blob()
-                const url = URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = file.name.replace('.docx', '.pdf')
-                a.click()
-                URL.revokeObjectURL(url)
-            } else if (format === 'html') {
-                // For HTML — open in a new browser tab
-                const html = await response.text()
-                const blob = new Blob([html], { type: 'text/html' })
-                const url = URL.createObjectURL(blob)
-                window.open(url, '_blank')
-            } else if (format === 'json') {
-                // For JSON — open raw JSON in a new tab for now
-                const json = await response.json()
-                const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' })
-                const url = URL.createObjectURL(blob)
-                window.open(url, '_blank')
+            const config = FORMAT_CONFIG[format]
+
+            if (config.download) {
+                await handleDownload(response, file.name, config.fileExtension)
+            } else if (config.openInNewTab) {
+                await handleOpenInNewTab(response, config.contentType)
             }
 
         } catch (err) {
-            setError(err.message)
+            setError(err.message || 'An unexpected error occurred')
         } finally {
             setLoading(false)
         }
-    }
+    }, [file, format])
 
     return (
         <div className="max-w-xl mx-auto pt-20 px-6">
@@ -82,6 +112,7 @@ function Converter() {
                     type="file"
                     accept=".docx"
                     onChange={handleFileChange}
+                    disabled={loading}
                     className="block w-full text-sm text-gray-400
                      file:mr-4 file:py-2 file:px-4
                      file:rounded file:border-0
@@ -105,9 +136,10 @@ function Converter() {
                         <button
                             key={f}
                             onClick={() => setFormat(f)}
+                            disabled={loading}
                             className={`px-5 py-2 rounded font-medium text-sm uppercase tracking-wide transition-colors
                 ${format === f
-                                ? 'bg-blue-300 text-white'
+                                ? 'bg-blue-300 text-gray-900'
                                 : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
                             }`}
                         >
@@ -120,12 +152,12 @@ function Converter() {
             {/* Convert Button */}
             <button
                 onClick={handleSubmit}
-                disabled={loading}
+                disabled={!file || loading}
                 className="w-full py-3 rounded font-semibold text-sm uppercase tracking-wide
-                   bg-blue-300 hover:bg-blue-500 disabled:bg-gray-700
-                   disabled:text-gray-500 transition-colors"
+                   bg-blue-300 text-gray-900 hover:bg-blue-200
+                   disabled:bg-gray-700 disabled:text-gray-500 transition-colors"
             >
-                {loading ? 'Converting...' : 'Convert'}
+                {loading ? 'Converting...' : `Convert to ${format.toUpperCase()}`}
             </button>
 
             {/* Error Message */}
